@@ -1,0 +1,130 @@
+<!doctype html>
+<html lang="en" data-theme="light" data-base-path="__BASE_PATH__">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <meta name="description" content="PM × McKinsey · EDGE AI Transformation Tracker">
+  <title>PM × McKinsey · EDGE Transformation Tracker</title>
+  <link rel="icon" href="data:,">
+  <link rel="stylesheet" href="__BASE_PATH__/styles.css">
+  <script src="__BASE_PATH__/app.js" defer></script>
+</head>
+<body>
+  <a class="skip-link" href="#main">Skip to dashboard</a>
+  <header class="topbar">
+    <div class="topbar-inner">
+      <div class="brand-lockup" aria-label="Publicis Media · EDGE">
+        <img class="publicis-logo" src="__BASE_PATH__/assets/publicis.png?v=media-monochrome" alt="Publicis Media">
+        <span class="brand-divider"></span>
+        <img class="edge-logo edge-logo-light" src="__BASE_PATH__/assets/edge.png" alt="Publicis EDGE">
+        <img class="edge-logo edge-logo-dark" src="__BASE_PATH__/assets/edge-dark.png" alt="Publicis EDGE">
+        <div class="brand-caption">TRANSFORMATION<br><strong>IN ACTION</strong></div>
+      </div>
+      <div class="top-actions">
+        <button id="themeToggle" class="icon-button" aria-label="Switch to dark mode" title="Switch to dark mode"><span data-icon="moon"></span></button>
+        <span class="action-divider"></span>
+        <button id="addButton" class="button button-outline" disabled><span data-icon="plus"></span>Add intervention</button>
+        <button id="saveButton" class="button button-primary" disabled><span data-icon="save"></span><span id="saveLabel">Save changes</span></button>
+      </div>
+    </div>
+  </header>
+
+  <main class="shell" id="main">
+    <section class="hero">
+      <div>
+        <h1>AI Transformation <em>Tracker.</em></h1>
+      </div>
+      <div class="hero-meta">
+        <div class="connection" id="connection"><i></i><span>Connecting…</span></div>
+        <div class="meta-label">Last saved · UTC+8</div>
+        <div class="meta-date" id="lastSaved">—</div>
+      </div>
+    </section>
+
+    <div class="notice error-notice" id="errorBanner" role="alert" hidden>
+      <span data-icon="alert"></span><span id="errorText"></span>
+      <button class="text-button" id="retryButton">Reconnect</button>
+      <button class="text-button" id="exportDraft" hidden>Export draft</button>
+    </div>
+    <div class="notice draft-notice" id="restoredBanner" hidden><span data-icon="info"></span><span id="restoredText"></span><button class="text-button" id="dismissRestored">Dismiss</button></div>
+
+    <section class="metrics" aria-label="Project metrics">
+      <button class="metric" data-metric="all" disabled><span class="metric-label">Interventions</span><span class="metric-main"><strong id="metricTotal">—</strong><span class="metric-icon" data-icon="layers"></span></span><span class="metric-detail" id="metricStreams">— workstreams</span></button>
+      <button class="metric" data-metric="In Progress" disabled><span class="metric-label">In progress</span><span class="metric-main"><strong id="metricProgress">—</strong><span class="metric-icon" data-icon="trend"></span></span><span class="metric-detail">Active work</span></button>
+      <button class="metric" data-metric="Delivered" disabled><span class="metric-label">Delivered</span><span class="metric-main"><strong id="metricDelivered">—</strong><span class="metric-icon" data-icon="check"></span></span><span class="metric-detail" id="metricDeliveryRate">—% delivery rate</span></button>
+      <button class="metric" data-metric="attention" disabled><span class="metric-label">Needs attention</span><span class="metric-main"><strong id="metricAttention">—</strong><span class="metric-icon" data-icon="flag"></span></span><span class="metric-detail">Blocked or overdue</span></button>
+    </section>
+
+    <div class="section-navigation">
+      <nav class="tabs" aria-label="Dashboard views" role="tablist">
+        <button class="tab active" id="tabOverview" role="tab" aria-selected="true" aria-controls="overviewPanel" disabled><span>01</span>Overview</button>
+        <button class="tab" id="tabTracker" role="tab" aria-selected="false" aria-controls="trackerPanel" tabindex="-1" disabled><span>02</span>Interventions <i id="tabCount">—</i></button>
+      </nav>
+    </div>
+
+    <section id="overviewPanel" role="tabpanel" aria-labelledby="tabOverview">
+      <div class="overview-heading"><div><div class="eyebrow small-eyebrow">PORTFOLIO AT A GLANCE</div><h2>Progress at a glance.</h2></div><span class="overview-date" id="asOfDate">—</span></div>
+      <div class="chart-layout">
+        <section class="panel workstream-panel">
+          <div class="panel-heading"><div><h3>Workstream progress</h3></div></div>
+          <div class="legend" id="workstreamLegend"></div>
+          <div id="workstreamChart" class="workstream-chart"><div class="skeleton" aria-label="Loading workstreams"></div></div>
+        </section>
+        <section class="panel status-panel">
+          <div class="panel-heading"><div><h3>Status breakdown</h3></div><span data-icon="chart"></span></div>
+          <div class="delivery-headline"><strong id="deliveryPercent">—<small>%</small></strong><div>Delivery rate<span>Delivered / all interventions</span></div></div>
+          <div id="statusChart" class="status-chart"></div>
+        </section>
+      </div>
+    </section>
+
+    <section id="trackerPanel" role="tabpanel" aria-labelledby="tabTracker" hidden>
+      <div class="overview-heading"><div><div class="eyebrow small-eyebrow">INTERVENTION TRACKER</div><h2>Move delivery forward.</h2></div></div>
+
+    <section class="register" aria-labelledby="registerHeading">
+      <div class="register-heading"><div class="register-title"><h3 id="registerHeading">Intervention register</h3><span id="resultCount">Loading…</span></div><div class="register-actions"><button id="discardButton" class="text-button" hidden>Discard drafts</button><button id="viewAllButton" class="text-button" disabled>View all <span data-icon="arrow"></span></button></div></div>
+      <div class="filterbar">
+        <label class="search-field"><span data-icon="search"></span><input type="search" id="searchInput" placeholder="Search interventions, owners…" aria-label="Search interventions, owners or progress" disabled><kbd>⌘ K</kbd></label>
+        <select id="workstreamFilter" aria-label="Filter by workstream" disabled><option value="">All workstreams</option></select>
+        <select id="statusFilter" aria-label="Filter by status" disabled><option value="">All statuses</option></select>
+        <button id="clearFilters" class="text-button" hidden>Clear filters</button>
+      </div>
+      <div class="active-filter" id="issueFilter" hidden></div>
+      <div class="table-scroll" tabindex="0" role="region" aria-label="Intervention register, scroll horizontally">
+        <table>
+          <thead><tr><th scope="col" class="number-cell">NO.</th><th scope="col" class="intervention-cell">INTERVENTION</th><th scope="col" class="owner-cell">OWNER</th><th scope="col" class="status-cell">STATUS</th><th scope="col" class="date-cell">TARGET DATE <button id="sortDate" class="sort-button" aria-label="Sort target date ascending"><span data-icon="sort"></span></button></th><th scope="col" class="progress-cell">PROGRESS & NEXT STEP</th><th scope="col" class="edit-cell"><span class="sr-only">Edit</span></th></tr></thead>
+          <tbody id="recordRows"><tr><td colspan="7" class="empty-state">Loading interventions…</td></tr></tbody>
+        </table>
+      </div>
+      <div class="table-footer"><span id="tableSummary">—</span></div>
+    </section>
+    </section>
+
+    <footer class="page-footer"><div><strong>PUBLICIS MEDIA × EDGE</strong></div></footer>
+  </main>
+
+  <div class="draft-dock" id="draftDock" hidden><span class="draft-dot"></span><div><strong id="draftCount">0 unsaved changes</strong></div><button id="dockSave" class="button button-primary"><span data-icon="save"></span>Save changes</button></div>
+  <div class="toast" id="toast" role="status" aria-live="polite" hidden></div>
+
+  <dialog id="editor" aria-labelledby="editorTitle">
+    <form id="editorForm">
+      <div class="editor-heading"><div><div class="eyebrow small-eyebrow">INTERVENTION DETAILS</div><h2 id="editorTitle">Edit intervention</h2></div><button type="button" id="editorClose" class="icon-button" aria-label="Close editor"><span data-icon="close"></span></button></div>
+      <div class="editor-body">
+        <div class="form-grid">
+          <label class="form-field full">Intervention <span class="required">*</span><textarea name="intervention" rows="2" required maxlength="1000" placeholder="Describe the deliverable"></textarea></label>
+          <label class="form-field full">Workstream <span class="required">*</span><input name="workstream" list="workstreamOptions" required maxlength="1000" placeholder="Select or enter a workstream"><datalist id="workstreamOptions"></datalist></label>
+          <label class="form-field">Intervention owner<input name="owner" maxlength="1000" placeholder="Owner name"></label>
+          <label class="form-field">EDGE owner<input name="edge_owner" maxlength="1000" placeholder="EDGE contact"></label>
+          <label class="form-field">Status <span class="required">*</span><select name="status" required></select></label>
+          <label class="form-field">Target date<input name="target_date" type="date" min="0001-01-01" max="9999-12-31"></label>
+          <label class="form-field full">Progress & next step<textarea name="progress" rows="6" maxlength="20000" placeholder="Latest update and next action"></textarea></label>
+          <label class="form-field full">Blocker / support needed<textarea name="blocker" rows="4" maxlength="20000" placeholder="Blockers or support required"></textarea></label>
+        </div>
+        <p class="form-error" id="editorError" role="alert" hidden></p>
+      </div>
+      <div class="editor-footer"><span>Apply, then save changes.</span><button type="button" id="editorCancel" class="button button-outline">Cancel</button><button type="submit" class="button button-primary"><span data-icon="check"></span>Apply draft</button></div>
+    </form>
+  </dialog>
+</body>
+</html>

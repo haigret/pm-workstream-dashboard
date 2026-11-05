@@ -1,0 +1,19 @@
+.venv/
+__pycache__/
+*.pyc
+data/*.sqlite3*
+.env
+db.md
+qa/
+local-admin-data/
+.DS_Store
+.screenshots/
+
+# 本机凭据，禁止入库
+joseph.hu@publicismedia.yaml
+
+# 无关的独立项目与构建产物
+RealtimeTranslator/
+build/
+dist/
+.build/
