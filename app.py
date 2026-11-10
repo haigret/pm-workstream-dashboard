@@ -81,6 +81,14 @@ def mount_path(name, default):
     return '/' + value.strip('/')
 
 
+def table_prefix(name, default=''):
+    """Prefix that lets two departments share one MySQL schema."""
+    value = setting(name, default)
+    if value and (not value.replace('_', '').isalnum() or not value[0].isalpha()):
+        raise ValidationError(f'{name} must be a table prefix such as pc_ (letters, digits, underscores).')
+    return value
+
+
 def caption_markup(text):
     """Render the two-line masthead caption, keeping the last two words bold."""
     words = text.split()
@@ -185,11 +193,11 @@ def mysql_config(path=ROOT / 'db.md', env_name='DATABASE_URL'):
                 init_command='SET SESSION TRANSACTION ISOLATION LEVEL REPEATABLE READ')
 
 
-def create_mysql_tables(db):
+def create_mysql_tables(db, prefix=''):
     tables = [
-        '''CREATE TABLE IF NOT EXISTS metadata (
+        f'''CREATE TABLE IF NOT EXISTS {prefix}metadata (
             `key` VARCHAR(80) PRIMARY KEY, value LONGTEXT NOT NULL)''',
-        '''CREATE TABLE IF NOT EXISTS interventions (
+        f'''CREATE TABLE IF NOT EXISTS {prefix}interventions (
             id VARCHAR(80) PRIMARY KEY,
             workstream TEXT NOT NULL, intervention TEXT NOT NULL,
             owner TEXT NOT NULL, edge_owner TEXT NOT NULL,
@@ -197,7 +205,7 @@ def create_mysql_tables(db):
             progress MEDIUMTEXT NOT NULL, blocker MEDIUMTEXT NOT NULL,
             source_row INTEGER, created_at VARCHAR(40) NOT NULL, updated_at VARCHAR(40) NOT NULL,
             position INTEGER NOT NULL)''',
-        '''CREATE TABLE IF NOT EXISTS saves (
+        f'''CREATE TABLE IF NOT EXISTS {prefix}saves (
             revision BIGINT PRIMARY KEY, saved_at VARCHAR(40) NOT NULL,
             changes_json LONGTEXT NOT NULL)''',
     ]
@@ -246,26 +254,26 @@ def empty_metadata():
             'updated_at': stamp, 'imported_rows': 0, 'workstream_options': []}
 
 
-def initialize(db, source, seed=True):
+def initialize(db, source, seed=True, prefix=''):
     if isinstance(db, dict):
         if not seed:
-            create_mysql_tables(db)
+            create_mysql_tables(db, prefix)
             with connect(db) as conn:
-                if not conn.execute("SELECT value FROM metadata WHERE `key`='revision'").fetchone():
-                    conn.executemany('INSERT INTO metadata VALUES (?, ?)',
+                if not conn.execute(f"SELECT value FROM {prefix}metadata WHERE `key`='revision'").fetchone():
+                    conn.executemany(f'INSERT INTO {prefix}metadata VALUES (?, ?)',
                                      [(k, json.dumps(v, ensure_ascii=False))
                                       for k, v in empty_metadata().items()])
             return
         with connect(db) as conn:
-            if not conn.execute("SELECT value FROM metadata WHERE `key`='revision'").fetchone():
+            if not conn.execute(f"SELECT value FROM {prefix}metadata WHERE `key`='revision'").fetchone():
                 raise ValidationError('MySQL is not initialized. Run migrate_database.py first.')
         return
     Path(db).parent.mkdir(parents=True, exist_ok=True)
     with connect(db) as conn:
         conn.execute('PRAGMA journal_mode=WAL')
-        conn.executescript('''
-            CREATE TABLE IF NOT EXISTS metadata (`key` TEXT PRIMARY KEY, value TEXT NOT NULL);
-            CREATE TABLE IF NOT EXISTS interventions (
+        conn.executescript(f'''
+            CREATE TABLE IF NOT EXISTS {prefix}metadata (`key` TEXT PRIMARY KEY, value TEXT NOT NULL);
+            CREATE TABLE IF NOT EXISTS {prefix}interventions (
                 id TEXT PRIMARY KEY,
                 workstream TEXT NOT NULL, intervention TEXT NOT NULL,
                 owner TEXT NOT NULL, edge_owner TEXT NOT NULL,
@@ -274,30 +282,30 @@ def initialize(db, source, seed=True):
                 source_row INTEGER, created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
                 position INTEGER NOT NULL
             );
-            CREATE TABLE IF NOT EXISTS saves (
+            CREATE TABLE IF NOT EXISTS {prefix}saves (
                 revision INTEGER PRIMARY KEY, saved_at TEXT NOT NULL,
                 changes_json TEXT NOT NULL
             );
         ''')
         conn.execute('BEGIN IMMEDIATE')
-        if conn.execute("SELECT value FROM metadata WHERE `key`='revision'").fetchone():
+        if conn.execute(f"SELECT value FROM {prefix}metadata WHERE `key`='revision'").fetchone():
             return  # Existing browser edits must never be overwritten on restart.
         if not seed:
-            conn.executemany('INSERT INTO metadata VALUES (?, ?)',
+            conn.executemany(f'INSERT INTO {prefix}metadata VALUES (?, ?)',
                              [(k, json.dumps(v, ensure_ascii=False))
                               for k, v in empty_metadata().items()])
             return
         fingerprint, imported, options = parse_workbook(source)
         stamp = now()
         for position, (row_number, record) in enumerate(imported):
-            conn.execute(f'INSERT INTO interventions VALUES ({",".join("?" for _ in range(13))})',
+            conn.execute(f'INSERT INTO {prefix}interventions VALUES ({",".join("?" for _ in range(13))})',
                          (str(uuid.uuid4()), *(record[k] for k in FIELDS), row_number, stamp, stamp, position))
         metadata = {'revision': 1, 'source_name': source.name, 'source_hash': fingerprint,
                     'imported_at': stamp, 'updated_at': stamp, 'imported_rows': len(imported),
                     'workstream_options': options}
-        conn.executemany('INSERT INTO metadata VALUES (?, ?)',
+        conn.executemany(f'INSERT INTO {prefix}metadata VALUES (?, ?)',
                          [(k, json.dumps(v, ensure_ascii=False)) for k, v in metadata.items()])
-        conn.execute('INSERT INTO saves VALUES (?, ?, ?)',
+        conn.execute(f'INSERT INTO {prefix}saves VALUES (?, ?, ?)',
                      (1, stamp, json.dumps({'type': 'excel_import', 'rows': imported}, ensure_ascii=False)))
     try:
         os.chmod(db, 0o600)
@@ -305,16 +313,16 @@ def initialize(db, source, seed=True):
         pass
 
 
-def snapshot(db):
+def snapshot(db, prefix=''):
     with connect(db) as conn:
         conn.execute('BEGIN')  # Records and revision must come from the same snapshot.
-        meta = {r['key']: json.loads(r['value']) for r in conn.execute('SELECT * FROM metadata')}
-        records = [dict(r) for r in conn.execute('SELECT * FROM interventions ORDER BY position')]
+        meta = {r['key']: json.loads(r['value']) for r in conn.execute(f'SELECT * FROM {prefix}metadata')}
+        records = [dict(r) for r in conn.execute(f'SELECT * FROM {prefix}interventions ORDER BY position')]
     return {'records': records, 'meta': meta, 'statuses': STATUSES,
             'today': datetime.now(ZoneInfo('Asia/Shanghai')).date().isoformat()}
 
 
-def save_changes(db, payload):
+def save_changes(db, payload, prefix=''):
     if not isinstance(payload, dict) or set(payload) != {'revision', 'changes'}:
         raise ValidationError('Invalid save request.')
     if type(payload['revision']) is not int:
@@ -333,36 +341,36 @@ def save_changes(db, payload):
     with connect(db) as conn:
         conn.execute('BEGIN IMMEDIATE')
         lock = ' FOR UPDATE' if isinstance(db, dict) else ''
-        revision = json.loads(conn.execute("SELECT value FROM metadata WHERE `key`='revision'" + lock).fetchone()['value'])
+        revision = json.loads(conn.execute(f"SELECT value FROM {prefix}metadata WHERE `key`='revision'" + lock).fetchone()['value'])
         if payload['revision'] != revision:
             raise ConflictError('Another window updated the data. Your draft is safe. Export it before reloading.')
         stamp, audit = now(), []
-        position = conn.execute('SELECT COALESCE(MAX(position), -1) AS last_position FROM interventions').fetchone()['last_position']
+        position = conn.execute(f'SELECT COALESCE(MAX(position), -1) AS last_position FROM {prefix}interventions').fetchone()['last_position']
         for record_id, record in prepared:
             if record_id.startswith('new-'):
                 position += 1
                 new_id = str(uuid.uuid4())
-                conn.execute(f'INSERT INTO interventions VALUES ({",".join("?" for _ in range(13))})',
+                conn.execute(f'INSERT INTO {prefix}interventions VALUES ({",".join("?" for _ in range(13))})',
                              (new_id, *(record[k] for k in FIELDS), None, stamp, stamp, position))
                 audit.append({'id': new_id, 'before': None, 'after': record})
             else:
-                old = conn.execute('SELECT * FROM interventions WHERE id=?', (record_id,)).fetchone()
+                old = conn.execute(f'SELECT * FROM {prefix}interventions WHERE id=?', (record_id,)).fetchone()
                 if old is None:
                     raise ValidationError('Intervention no longer exists. No changes were saved.')
                 before = {k: old[k] for k in FIELDS}
                 if before != record:
-                    conn.execute(f'UPDATE interventions SET {",".join(k+"=?" for k in FIELDS)}, updated_at=? WHERE id=?',
+                    conn.execute(f'UPDATE {prefix}interventions SET {",".join(k+"=?" for k in FIELDS)}, updated_at=? WHERE id=?',
                                  (*(record[k] for k in FIELDS), stamp, record_id))
                     audit.append({'id': record_id, 'before': before, 'after': record})
         if audit:
             revision += 1
-            conn.execute('INSERT INTO saves VALUES (?, ?, ?)',
+            conn.execute(f'INSERT INTO {prefix}saves VALUES (?, ?, ?)',
                          (revision, stamp, json.dumps(audit, ensure_ascii=False)))
-            conn.execute("UPDATE metadata SET value=? WHERE `key`='revision'", (json.dumps(revision),))
-            conn.execute("UPDATE metadata SET value=? WHERE `key`='updated_at'", (json.dumps(stamp),))
+            conn.execute(f"UPDATE {prefix}metadata SET value=? WHERE `key`='revision'", (json.dumps(revision),))
+            conn.execute(f"UPDATE {prefix}metadata SET value=? WHERE `key`='updated_at'", (json.dumps(stamp),))
         # Read under the write transaction; a concurrent save cannot leak into this response.
-        meta = {r['key']: json.loads(r['value']) for r in conn.execute('SELECT * FROM metadata')}
-        records = [dict(r) for r in conn.execute('SELECT * FROM interventions ORDER BY position')]
+        meta = {r['key']: json.loads(r['value']) for r in conn.execute(f'SELECT * FROM {prefix}metadata')}
+        records = [dict(r) for r in conn.execute(f'SELECT * FROM {prefix}interventions ORDER BY position')]
         return {'records': records, 'meta': meta, 'statuses': STATUSES,
                 'today': datetime.now(ZoneInfo('Asia/Shanghai')).date().isoformat(),
                 'saved_count': len(audit)}
@@ -406,7 +414,7 @@ class Handler(BaseHTTPRequestHandler):
 
     @property
     def streams(self):
-        return getattr(self.server, 'streams', None) or {'': {'db': self.server.db, 'brand': brand()}}
+        return getattr(self.server, 'streams', None) or {'': {'db': self.server.db, 'brand': brand(), 'prefix': ''}}
 
     @property
     def mounts(self):
@@ -429,10 +437,10 @@ class Handler(BaseHTTPRequestHandler):
         stream = self.stream(mount)
         try:
             if route == '/api/data':
-                return self.respond(200, snapshot(stream['db']))
+                return self.respond(200, snapshot(stream['db'], stream['prefix']))
             if route == '/health':
                 with connect(stream['db']) as conn:
-                    conn.execute('SELECT 1 FROM interventions LIMIT 1')
+                    conn.execute(f"SELECT 1 FROM {stream['prefix']}interventions LIMIT 1")
                 storage = 'MySQL' if isinstance(stream['db'], dict) else 'SQLite'
                 return self.respond(200, {'status': 'ok', 'storage': storage, 'app': 'pm-mckinsey-tracker',
                                            'mounts': list(self.streams)})
@@ -467,7 +475,8 @@ class Handler(BaseHTTPRequestHandler):
             mount, route = self.split_mount(self.route())
             if route != '/api/save':
                 return self.respond(404, {'error': 'Not found'})
-            return self.respond(200, save_changes(self.stream(mount)['db'], payload))
+            stream = self.stream(mount)
+            return self.respond(200, save_changes(stream['db'], payload, stream['prefix']))
         except ConflictError as exc:
             return self.respond(409, {'error': str(exc)})
         except (ValidationError, ValueError, UnicodeError) as exc:
@@ -491,19 +500,25 @@ def main():
     server.db = db
     server.base_path = base_path()
 
-    pm = {'db': db, 'brand': brand()}
+    pm = {'db': db, 'brand': brand(), 'prefix': table_prefix('TABLE_PREFIX')}
     streams, mounts = {'': pm}, ['']
     pm_mount = mount_path('PM_MOUNT', '/pm')
     if pm_mount:
         streams[pm_mount] = pm
         mounts.append(pm_mount)
-    if args.pc_db is not None or os.environ.get('PC_DATABASE_URL', '').strip():
-        pc_db = args.pc_db if args.pc_db is not None else mysql_config(env_name='PC_DATABASE_URL')
-        initialize(pc_db, args.source, seed=False)  # The second department starts empty.
-        pc_mount = mount_path('PC_MOUNT', '/pc')
+    pc_mount = mount_path('PC_MOUNT', '/pc')
+    if pc_mount or args.pc_db is not None or os.environ.get('PC_DATABASE_URL', '').strip():
         if not pc_mount:
             raise ValidationError('Set PC_MOUNT to a sub-path such as /pc.')
-        streams[pc_mount] = {'db': pc_db, 'brand': pc_brand()}
+        # PC reuses the PM connection unless a dedicated DSN is given; the table
+        # prefix keeps both departments in separate tables of the same schema.
+        pc_prefix = table_prefix('PC_TABLE_PREFIX', 'pc_')
+        pc_db = (args.pc_db if args.pc_db is not None else
+                 mysql_config(env_name='PC_DATABASE_URL') if os.environ.get('PC_DATABASE_URL', '').strip() else db)
+        if pc_db is db and not pc_prefix:
+            raise ValidationError('Set PC_TABLE_PREFIX when PC shares the PM database.')
+        initialize(pc_db, args.source, seed=False, prefix=pc_prefix)  # The second department starts empty.
+        streams[pc_mount] = {'db': pc_db, 'brand': pc_brand(), 'prefix': pc_prefix}
         mounts.append(pc_mount)
     server.streams, server.mounts = streams, mounts
 
