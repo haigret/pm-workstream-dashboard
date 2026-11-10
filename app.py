@@ -108,6 +108,7 @@ def render_page(text, prefix='', info=None):
         '__BRAND_CAPTION__': caption_markup(info['subtitle']),
         '__BRAND_LOGO__': escape(info['logo']),
         '__BRAND_ALT__': escape(info['logo_alt']),
+        '__BRAND_ALT_UPPER__': escape(info['logo_alt'].upper()),
         '__BRAND_SLUG__': escape(info['slug']),
     }
     for key, value in values.items():
