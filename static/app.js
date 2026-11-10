@@ -38,7 +38,24 @@ const esc = value => String(value ?? '').replace(/[&<>"']/g, char => ({'&': '&am
 const option = (value, text = value) => `<option value="${esc(value)}">${esc(text)}</option>`;
 const colorStyle = status => `--status-color:var(${STATUS[status]?.color || '--not-started'})`;
 const badge = status => `<span class="status-badge" style="${colorStyle(status)}"><i></i>${esc(status)}</span>`;
-const canonical = name => ({'GR / billing and collection': 'GR / billing & collection', 'Tatical plan': 'Tactical plan'}[name] || name);
+// Normalize spelling variants so "and"/"&" and typos never create duplicate groups.
+const canonical = name => String(name ?? '')
+  .replace('Tatical', 'Tactical')
+  .replace(/\band\b/g, '&')
+  .replace('post-buy', 'postbuy')
+  .replace(/\s+/g, ' ')
+  .trim();
+// Fixed display order defined by the workstream reference list. Unknown streams
+// sort after the known ones, alphabetically, so new workstreams never break the layout.
+const WORKSTREAM_ORDER = ['mediastrategycampaignplanning', 'tacticalplan', 'performancetrackingpostbuy',
+  'grbillingcollection', 'prepayment', 'enabler'];
+const streamKey = name => canonical(name).toLowerCase().replace(/[^a-z0-9]/g, '');
+const streamRank = name => {
+  const index = WORKSTREAM_ORDER.indexOf(streamKey(name));
+  return index === -1 ? WORKSTREAM_ORDER.length : index;
+};
+const orderedStreams = rows => [...new Set(rows.map(row => canonical(row.workstream)))]
+  .sort((a, b) => (streamRank(a) - streamRank(b)) || a.localeCompare(b));
 const two = number => String(number).padStart(2, '0');
 const active = row => !['Delivered', 'On Hold / Cancelled'].includes(row.status);
 const overdue = row => !!row.target_date && row.target_date < DATA.today && active(row);
@@ -116,7 +133,7 @@ function renderMetrics() {
 }
 function renderCharts() {
   $('workstreamLegend').innerHTML = CHART_ORDER.map(status => `<span class="legend-item" style="${colorStyle(status)}"><i class="legend-swatch"></i>${esc(status)}</span>`).join('');
-  const streams = [...new Set(records.map(row => canonical(row.workstream)))];
+  const streams = orderedStreams(records);
   $('workstreamChart').innerHTML = streams.map(stream => {
     const rows = records.filter(row => canonical(row.workstream) === stream);
     const counts = CHART_ORDER.map(status => [status, rows.filter(row => row.status === status).length]);
@@ -134,13 +151,18 @@ function renderCharts() {
 }
 function renderOptions() {
   const selectedStream = $('workstreamFilter').value, selectedStatus = $('statusFilter').value;
-  const groups = [...new Set(records.map(row => canonical(row.workstream)))];
+  const groups = orderedStreams(records);
   $('workstreamFilter').innerHTML = option('', 'All workstreams') + groups.map(value => option(value)).join('');
   $('statusFilter').innerHTML = option('', 'All statuses') + DATA.statuses.map(value => option(value)).join('');
   $('workstreamFilter').value = groups.includes(selectedStream) ? selectedStream : '';
   $('statusFilter').value = selectedStatus;
-  const originalNames = [...new Set([...DATA.meta.workstream_options, ...records.map(row => row.workstream)])];
-  $('workstreamOptions').innerHTML = originalNames.map(value => option(value)).join('');
+  // One canonical, de-duplicated, ordered source for the editor suggestion list.
+  // Includes workstreams from the Options sheet (e.g. Pre-payment) even when no
+  // record uses them yet, and merges spelling variants from existing records.
+  const optionRows = [...(DATA.meta.workstream_options || []), ...records.map(row => row.workstream)]
+    .map(workstream => ({workstream}));
+  const editorStreams = orderedStreams(optionRows);
+  $('workstreamOptions').innerHTML = editorStreams.map(value => option(value)).join('');
   $('editorForm').elements.status.innerHTML = DATA.statuses.map(value => option(value)).join('');
 }
 function renderTable() {
@@ -288,7 +310,8 @@ function exportDraft() {
   const url = URL.createObjectURL(blob);
   const link = document.createElement('a');
   link.href = url;
-  link.download = `PM-McKinsey-draft-${DATA.today}.json`;
+  const brandSlug = document.documentElement.dataset.brandSlug || 'PM-McKinsey';
+  link.download = `${brandSlug}-draft-${DATA.today}.json`;
   link.click();
   setTimeout(() => URL.revokeObjectURL(url), 1000);
 }

@@ -4,6 +4,7 @@ import argparse
 from contextlib import contextmanager
 from datetime import date, datetime, timezone
 import hashlib
+from html import escape
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
 import logging
@@ -43,6 +44,67 @@ def base_path():
     if value in ('', '/'):
         return ''
     return '/' + value.strip('/')
+
+
+def setting(name, default):
+    return os.environ.get(name, '').strip() or default
+
+
+def brand():
+    """Branding comes from env so one image serves several departments."""
+    return {
+        'title': setting('APP_TITLE', 'PM × McKinsey'),
+        'subtitle': setting('APP_SUBTITLE', 'TRANSFORMATION IN ACTION'),
+        'logo': setting('BRAND_LOGO', 'publicis.png'),
+        'logo_alt': setting('BRAND_ALT', 'Publicis Media'),
+        'slug': setting('BRAND_SLUG', 'PM-McKinsey'),
+    }
+
+
+def pc_brand():
+    """Second department shares the image; only these values differ."""
+    title = setting('PC_TITLE', 'Publicis Communication')
+    return {
+        'title': title,
+        'subtitle': setting('PC_SUBTITLE', setting('APP_SUBTITLE', 'TRANSFORMATION IN ACTION')),
+        'logo': setting('PC_LOGO', 'logo-pc.png'),
+        'logo_alt': setting('PC_ALT', title),
+        'slug': setting('PC_SLUG', 'PC'),
+    }
+
+
+def mount_path(name, default):
+    """Normalize a sub-path mount to '/name' (or '' to serve at the root)."""
+    value = os.environ.get(name, default).strip()
+    if value in ('', '/'):
+        return ''
+    return '/' + value.strip('/')
+
+
+def caption_markup(text):
+    """Render the two-line masthead caption, keeping the last two words bold."""
+    words = text.split()
+    lead = ' '.join(words[:-2])
+    accent = ' '.join(words[-2:])
+    if lead:
+        return f'{escape(lead)}<br><strong>{escape(accent)}</strong>'
+    return f'<strong>{escape(accent)}</strong>'
+
+
+def render_page(text, prefix='', info=None):
+    """Substitute the placeholders shared by the dashboard and the local admin."""
+    info = info or brand()
+    values = {
+        '__BASE_PATH__': escape(prefix),
+        '__APP_TITLE__': escape(info['title']),
+        '__BRAND_CAPTION__': caption_markup(info['subtitle']),
+        '__BRAND_LOGO__': escape(info['logo']),
+        '__BRAND_ALT__': escape(info['logo_alt']),
+        '__BRAND_SLUG__': escape(info['slug']),
+    }
+    for key, value in values.items():
+        text = text.replace(key, value)
+    return text
 
 
 def clean_record(value):
@@ -103,8 +165,8 @@ class MySQLConnection:
             cursor.executemany(sql.replace('?', '%s'), rows)
 
 
-def mysql_config(path=ROOT / 'db.md'):
-    env_url = os.environ.get('DATABASE_URL', '').strip()
+def mysql_config(path=ROOT / 'db.md', env_name='DATABASE_URL'):
+    env_url = os.environ.get(env_name, '').strip()
     if env_url:
         urls = [env_url]
     else:
@@ -178,8 +240,22 @@ def parse_workbook(source):
     return fingerprint, imported, options
 
 
-def initialize(db, source):
+def empty_metadata():
+    stamp = now()
+    return {'revision': 1, 'source_name': '', 'source_hash': '', 'imported_at': stamp,
+            'updated_at': stamp, 'imported_rows': 0, 'workstream_options': []}
+
+
+def initialize(db, source, seed=True):
     if isinstance(db, dict):
+        if not seed:
+            create_mysql_tables(db)
+            with connect(db) as conn:
+                if not conn.execute("SELECT value FROM metadata WHERE `key`='revision'").fetchone():
+                    conn.executemany('INSERT INTO metadata VALUES (?, ?)',
+                                     [(k, json.dumps(v, ensure_ascii=False))
+                                      for k, v in empty_metadata().items()])
+            return
         with connect(db) as conn:
             if not conn.execute("SELECT value FROM metadata WHERE `key`='revision'").fetchone():
                 raise ValidationError('MySQL is not initialized. Run migrate_database.py first.')
@@ -206,6 +282,11 @@ def initialize(db, source):
         conn.execute('BEGIN IMMEDIATE')
         if conn.execute("SELECT value FROM metadata WHERE `key`='revision'").fetchone():
             return  # Existing browser edits must never be overwritten on restart.
+        if not seed:
+            conn.executemany('INSERT INTO metadata VALUES (?, ?)',
+                             [(k, json.dumps(v, ensure_ascii=False))
+                              for k, v in empty_metadata().items()])
+            return
         fingerprint, imported, options = parse_workbook(source)
         stamp = now()
         for position, (row_number, record) in enumerate(imported):
@@ -323,25 +404,46 @@ class Handler(BaseHTTPRequestHandler):
                 return path[len(prefix):]
         return path
 
+    @property
+    def streams(self):
+        return getattr(self.server, 'streams', None) or {'': {'db': self.server.db, 'brand': brand()}}
+
+    @property
+    def mounts(self):
+        return getattr(self.server, 'mounts', [''])
+
+    def split_mount(self, path):
+        """Pick the department stream from the first path segment."""
+        for mount in self.mounts:
+            if mount and (path == mount or path.startswith(mount + '/')):
+                return mount, path[len(mount):] or '/'
+        return '', path
+
+    def stream(self, mount):
+        return self.streams.get(mount) or self.streams['']
+
     def do_GET(self):
         if not self.trusted():
             return self.respond(403, {'error': 'Same-origin requests only.'})
-        route = self.route()
+        mount, route = self.split_mount(self.route())
+        stream = self.stream(mount)
         try:
             if route == '/api/data':
-                return self.respond(200, snapshot(self.server.db))
+                return self.respond(200, snapshot(stream['db']))
             if route == '/health':
-                with connect(self.server.db) as conn:
+                with connect(stream['db']) as conn:
                     conn.execute('SELECT 1 FROM interventions LIMIT 1')
-                storage = 'MySQL' if isinstance(self.server.db, dict) else 'SQLite'
-                return self.respond(200, {'status': 'ok', 'storage': storage, 'app': 'pm-mckinsey-tracker'})
+                storage = 'MySQL' if isinstance(stream['db'], dict) else 'SQLite'
+                return self.respond(200, {'status': 'ok', 'storage': storage, 'app': 'pm-mckinsey-tracker',
+                                           'mounts': list(self.streams)})
             if route == '/':
-                prefix = getattr(self.server, 'base_path', '')
+                prefix = getattr(self.server, 'base_path', '') + mount
                 html = (ROOT / 'static' / 'index.html').read_text(encoding='utf-8')
-                return self.respond(200, html.replace('__BASE_PATH__', prefix), 'text/html; charset=utf-8')
+                return self.respond(200, render_page(html, prefix, stream['brand']), 'text/html; charset=utf-8')
             files = {'/app.js': ('app.js', 'text/javascript; charset=utf-8'),
                      '/styles.css': ('styles.css', 'text/css; charset=utf-8'),
                      '/assets/publicis.png': ('assets/publicis.png', 'image/png'),
+                     '/assets/logo-pc.png': ('assets/logo-pc.png', 'image/png'),
                      '/assets/edge.png': ('assets/edge.png', 'image/png'),
                      '/assets/edge-dark.png': ('assets/edge-dark.png', 'image/png')}
             if route not in files:
@@ -355,8 +457,6 @@ class Handler(BaseHTTPRequestHandler):
     def do_POST(self):
         if not self.trusted():
             return self.respond(403, {'error': 'Same-origin requests only.'})
-        if self.route() != '/api/save':
-            return self.respond(404, {'error': 'Not found'})
         if self.headers.get('Content-Type', '').split(';')[0].strip() != 'application/json':
             return self.respond(415, {'error': 'Only JSON requests are accepted.'})
         try:
@@ -364,7 +464,10 @@ class Handler(BaseHTTPRequestHandler):
             if not 0 < size <= 4_000_000:
                 return self.respond(413, {'error': 'Save request is empty or exceeds 4 MB.'})
             payload = json.loads(self.rfile.read(size))
-            return self.respond(200, save_changes(self.server.db, payload))
+            mount, route = self.split_mount(self.route())
+            if route != '/api/save':
+                return self.respond(404, {'error': 'Not found'})
+            return self.respond(200, save_changes(self.stream(mount)['db'], payload))
         except ConflictError as exc:
             return self.respond(409, {'error': str(exc)})
         except (ValidationError, ValueError, UnicodeError) as exc:
@@ -379,6 +482,7 @@ def main():
     parser.add_argument('--port', type=int, default=int(os.environ.get('PORT') or 9733))
     parser.add_argument('--host', default='127.0.0.1', help='Bind address; the container uses 0.0.0.0.')
     parser.add_argument('--db', type=Path, help='Use an explicit SQLite file (tests or local recovery).')
+    parser.add_argument('--pc-db', type=Path, help='SQLite file for the second department (PC).')
     parser.add_argument('--source', type=Path, default=ROOT / 'EDGE_AI_Transformation_Tracker.xlsx')
     args = parser.parse_args()
     db = args.db if args.db is not None else mysql_config()
@@ -386,8 +490,26 @@ def main():
     server = ThreadingHTTPServer((args.host, args.port), Handler)
     server.db = db
     server.base_path = base_path()
+
+    pm = {'db': db, 'brand': brand()}
+    streams, mounts = {'': pm}, ['']
+    pm_mount = mount_path('PM_MOUNT', '/pm')
+    if pm_mount:
+        streams[pm_mount] = pm
+        mounts.append(pm_mount)
+    if args.pc_db is not None or os.environ.get('PC_DATABASE_URL', '').strip():
+        pc_db = args.pc_db if args.pc_db is not None else mysql_config(env_name='PC_DATABASE_URL')
+        initialize(pc_db, args.source, seed=False)  # The second department starts empty.
+        pc_mount = mount_path('PC_MOUNT', '/pc')
+        if not pc_mount:
+            raise ValidationError('Set PC_MOUNT to a sub-path such as /pc.')
+        streams[pc_mount] = {'db': pc_db, 'brand': pc_brand()}
+        mounts.append(pc_mount)
+    server.streams, server.mounts = streams, mounts
+
     storage = 'MySQL (db.md)' if isinstance(db, dict) else f'SQLite: {db}'
-    print(f'PM × McKinsey | http://{args.host}:{server.server_port}{server.base_path or "/"} | {storage}', flush=True)
+    paths = ', '.join(f'{server.base_path}{m}/' for m in mounts)
+    print(f'{brand()["title"]} | http://{args.host}:{server.server_port} | {paths} | {storage}', flush=True)
     logging.basicConfig(level=logging.INFO, stream=sys.stderr,
                         format='%(asctime)s %(levelname)s %(message)s')
     try:

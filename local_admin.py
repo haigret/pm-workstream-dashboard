@@ -288,7 +288,7 @@ def make_server(state, port=8766):
                     return app.Handler.do_GET(self)
                 self.validate()
                 if route in ('/', '/admin'):
-                    page = (ROOT / 'local-admin' / 'index.html').read_text(encoding='utf-8')
+                    page = app.render_page((ROOT / 'local-admin' / 'index.html').read_text(encoding='utf-8'))
                     self.send(200, page.replace('__CSRF_TOKEN__', csrf_token).encode(), 'text/html; charset=utf-8')
                 elif route == '/api/status':
                     self.send(200, state.status())
@@ -397,7 +397,7 @@ def main():
     load_dotenv()
     server = make_server(AdminState(args.data_dir), args.port)
     url = f'http://127.0.0.1:{server.server_port}/'
-    print(f'PM × McKinsey Excel 上传后台: {url}\n仅本机可访问；保留此终端窗口。\n'
+    print(f'{app.brand()["title"]} Excel 上传后台: {url}\n仅本机可访问；保留此终端窗口。\n'
           f'本地数据: {args.data_dir}\n上传/导入不会自动发布线上。', flush=True)
     if args.open:
         webbrowser.open(url)

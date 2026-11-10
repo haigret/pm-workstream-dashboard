@@ -47,7 +47,7 @@ const ready = new Promise((resolve, reject) => {
     assert.equal(await page.locator('.status-row').count(), 6);
     assert.equal(await page.locator('#recordRows tr').count(), 5);
     assert.doesNotMatch(await page.locator('body').innerText(), /LVMH|Maison|Market/i);
-    assert.equal(await page.locator('img').count(), 2);
+    assert.equal(await page.locator('img:visible').count(), 2);
     assert.equal(await page.locator('img').evaluateAll(images => images.every(image => image.complete && image.naturalWidth > 0)), true);
     await assertNoOverflow(page);
     await page.screenshot({path: path.join(qa, 'overview-light.png'), fullPage: true});
