@@ -173,6 +173,9 @@ class TrackerTests(unittest.TestCase):
         self.assertEqual(request('POST', '/api/save', payload, {'Content-Type': 'text/plain'})[0], 415)
         self.assertEqual(request('POST', '/api/save', payload, {'Content-Type': 'application/json', 'Origin': 'https://evil.example'})[0], 403)
         self.assertEqual(request('GET', '/api/data', headers={'Sec-Fetch-Site': 'cross-site'})[0], 403)
+        nav = {'Sec-Fetch-Site': 'cross-site', 'Sec-Fetch-Mode': 'navigate', 'Sec-Fetch-Dest': 'document'}
+        self.assertEqual(request('GET', '/ptsd-00350', headers=nav)[0], 200)
+        self.assertEqual(request('GET', '/ptsd-00350/api/data', headers=nav)[0], 403)
         self.assertEqual(request('POST', '/api/save', '{', {'Content-Type': 'application/json'})[0], 400)
         self.assertEqual(request('POST', '/api/save', payload, {'Content-Type': 'application/json', 'Origin': f'http://127.0.0.1:{port}'})[0], 200)
         self.assertEqual(request('POST', '/api/save', payload, {'Content-Type': 'application/json'})[0], 409)

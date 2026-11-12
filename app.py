@@ -398,9 +398,18 @@ class Handler(BaseHTTPRequestHandler):
         # Origin against Host instead of assuming loopback, and reject cross-site calls.
         host = self.headers.get('Host')
         origin = self.headers.get('Origin')
-        return (bool(host)
-                and (origin is None or urlsplit(origin).netloc == host)
-                and self.headers.get('Sec-Fetch-Site') != 'cross-site')
+        if not host or (origin is not None and urlsplit(origin).netloc != host):
+            return False
+        if self.headers.get('Sec-Fetch-Site') != 'cross-site':
+            return True
+        # A link from an email or another site is a plain top-level navigation, so let
+        # the page itself load; API reads and writes still require a same-origin caller.
+        if not (self.command == 'GET'
+                and self.headers.get('Sec-Fetch-Mode') == 'navigate'
+                and self.headers.get('Sec-Fetch-Dest') == 'document'):
+            return False
+        _, route = self.split_mount(self.route())
+        return not route.startswith('/api/')
 
     def route(self):
         """Strip the optional BASE_PATH prefix so nginx may keep or remove it."""
